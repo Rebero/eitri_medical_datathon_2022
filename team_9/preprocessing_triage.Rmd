@@ -1,0 +1,121 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+Read the data
+
+```{r}
+# install.packages("lme")
+# install.packages("mgcv")
+# install.packages("plotly")
+# install.packages("ggplot2")
+library('mgcv')
+library(ggplot2)
+```
+
+```{r}
+data  = read.csv('Emergency department 2012 to 17 datathon v1.1.xlsx - Data.csv', header=TRUE)
+```
+
+# Recoding
+
+Re-code DOW to only indicate weekday (=1) and weekend (=2)
+
+```{r}
+data$DOW = as.factor(data$DOW)
+data$Dischgto = as.factor(data$Dischgto)
+```
+
+# Create new columns
+
+The time in minutes from coming in and leaving
+
+```{r}
+data$Time_in_Parse = as.POSIXct(data$Time_in, format="%H:%M:%S")
+data$Time_out_Parse = as.POSIXct(data$Time_out, format="%H:%M:%S")
+data$Hour_in = format(data$Time_in_Parse, format="%H")
+data$Minutes_in = difftime(data$Time_out_Parse, data$Time_in_Parse, units="mins")
+data$Minutes_in[data$Minutes_in < 0 & !is.na(data$Minutes_in)] = (24*60) + data$Minutes_in[data$Minutes_in < 0 & !is.na(data$Minutes_in)]
+data$DischICU[is.na(data$DischICU)] = 0
+```
+
+```{r}
+data$mrt = 0
+data$mrt[data$X24hmrt == 1] = 1
+data$mrt[data$mrt == 0 & data$X7dmrt ==  1] = 2
+data$mrt[data$mrt == 0 & data$X30dmrt == 1] = 3
+# assume that a Triagestm of NA is a new class == 0
+data$Htriage[data$Htriage == 6] = 5
+data$Triagestm[is.na(data$Triagestm)] = 0
+```
+
+Save a version
+
+```{r}
+write.csv(data,file="triage_recoding.csv")
+```
+
+# What column do we want to use?
+
+```{r}
+cols = c("Age", "Kjonn", "Shift", "DOW", "EDLOS", "Hour_in", "mrt", "DischICU", "Htriage", "Triagestm")
+data_filtered = data[,cols]
+data_filtered$EDLOS = as.numeric(data_filtered$EDLOS)
+data_filtered$Hour_in = as.numeric(data_filtered$Hour_in)
+data_filtered$Htriage = as.factor(data$Htriage)
+data_filtered$Triagestm = as.factor(data$Triagestm)
+data_filtered$DischICU = as.factor(data$DischICU)
+data_filtered$mrt = as.factor(data$mrt)
+```
+```{r}
+summary(complete.cases(data_filtered))
+```
+```{r}
+library(tableone)
+CreateTableOne(data=data_filtered)
+```
+
+```{r}
+write.csv(data_filtered,file="triage_recoding.csv", row.names=FALSE)
+```
+
+
+### Plot the HTriage score over mortality
+
+```{r}
+data2 = data_filtered[data_filtered$mrt == 1,]  # 24h
+summary(data2$Htriage)
+data2 = data_filtered[data_filtered$mrt == 3,]  # 24h
+summary(data2$Htriage)
+```
+
+
+## A linear model for feature importance
+
+Now we can start a basic model to explain what we see:
+
+```{r}
+data_filtered$mrt[data_filtered$mrt == 0] = 300
+
+independent="mrt"
+dependent=cols[-grep (independent, cols)]
+dependent=dependent[-grep("Shift", dependent)]
+#dependent=dependent[-grep("Hour_in", dependent)]
+#dependent=dependent[-grep("EDLOS", dependent)]
+data_filtered$mrt = as.numeric(data_filtered$mrt)
+model = formula(paste("mrt~", paste(dependent, collapse="+")))
+data_filtered = data_filtered[complete.cases(data_filtered),]
+fit = lm(model, data=data_filtered)
+```
+
+```{r}
+summary(fit)
+```
+
+```{r}
+plot(fit)
+```
+
+
